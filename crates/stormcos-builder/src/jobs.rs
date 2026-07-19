@@ -74,16 +74,28 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
     let images = app.cfg.images_dir();
     let _ = std::fs::create_dir_all(&images);
     let manifest = images.join(format!("{id}.manifest.json"));
-    // Args: flavor, release-id, out-dir, manifest-path, comma-joined assets.
-    let args = vec![
-        flavor.clone(),
-        id.clone(),
-        images.to_string_lossy().to_string(),
-        manifest.to_string_lossy().to_string(),
-        assets.join(","),
-    ];
 
-    let result = run(&app.cfg.scripts.build_image, &args, &log).await;
+    // Prefer the in-process Rust pipeline; fall back to the build script.
+    let result: anyhow::Result<(Vec<Artifact>, Vec<NetworkTarget>)> =
+        if app.cfg.pipeline.is_some() {
+            crate::pipeline::build(&app.cfg, &flavor, &id, &images, &log).await
+        } else {
+            // Args: flavor, release-id, out-dir, manifest-path, comma-joined assets.
+            let args = vec![
+                flavor.clone(),
+                id.clone(),
+                images.to_string_lossy().to_string(),
+                manifest.to_string_lossy().to_string(),
+                assets.join(","),
+            ];
+            run(&app.cfg.scripts.build_image, &args, &log).await.map(|()| {
+                std::fs::read(&manifest)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<BuildManifest>(&b).ok())
+                    .map(|m| (m.artifacts, m.targets))
+                    .unwrap_or_default()
+            })
+        };
 
     app.mutate(|s| {
         let ok = result.is_ok();
@@ -94,12 +106,8 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
                 b.release_id = Some(id.clone());
             }
         }
-        if ok {
-            let (artifacts, targets) = std::fs::read(&manifest)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<BuildManifest>(&b).ok())
-                .map(|m| (m.artifacts, m.targets))
-                .unwrap_or_default();
+        if let Ok((artifacts, targets)) = &result {
+            let (artifacts, targets) = (artifacts.clone(), targets.clone());
             s.releases.push(Release {
                 id: id.clone(),
                 flavor: flavor.clone(),

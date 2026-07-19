@@ -54,6 +54,12 @@ create/rebuild/delete named clusters.
 
 ## Design
 
+**`build-image` is a Rust implementation** (`pipeline.rs`): it calls
+stormcos-install's boot-image assembly as a **library, in-process**, drives
+the compose steps through the `stormcos-compose` binary, and shells out only
+for genuinely external tools (qemu-img). Configure `[pipeline]` to use it; it
+falls back to `scripts.build_image` otherwise.
+
 The service owns HTTP + state (a JSON file) + the watcher/job engine. The
 environment-specific heavy lifting lives in `scripts/` (build the image via the
 stormcos pipeline, provision/rebuild/delete via terragrunt + stormcos-installer

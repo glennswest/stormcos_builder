@@ -9,6 +9,7 @@ mod config;
 mod github;
 mod jobs;
 mod model;
+mod pipeline;
 mod web;
 
 use std::sync::Arc;

@@ -64,3 +64,18 @@ name = "open-stormcos"
 description = "Full open release: control plane + node agent + observability"
 extends = "network"
 assets = ["rustkube", "rustkube-node", "fastetcd", "cadvisor", "ironprom"]
+
+# --- in-process Rust build pipeline (Linux build host) --------------------
+# When present, build-image runs in Rust: stormcos-install's boot-image
+# library is called in-process, compose steps drive the stormcos-compose
+# binary, and qemu-img makes the qcow2 — no bash build script. Omit this
+# section to fall back to scripts.build_image.
+# [pipeline]
+# kernel      = "/root/kver/x/lib/modules/6.12.0-211.34.1.el10_2.x86_64/vmlinuz"
+# initramfs   = "/root/stormcos-initramfs-ci.img"
+# bootloader  = "/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+# disk_device = "/dev/sda"
+# compose_bin = "stormcos-compose"
+# layers_dir  = "/root/layers"
+# image_store = "/root/out/image-store-kubernetes.erofs"
+# qemu_img    = "qemu-img"

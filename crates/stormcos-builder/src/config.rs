@@ -27,6 +27,45 @@ pub struct Config {
     pub scripts: Scripts,
     #[serde(default)]
     pub dns: Dns,
+    /// When set, build-image runs the in-process Rust pipeline (calling the
+    /// stormcos-install boot-image library + driving compose) instead of the
+    /// `scripts.build_image` shell script.
+    #[serde(default)]
+    pub pipeline: Option<Pipeline>,
+}
+
+/// Inputs for the in-process Rust build pipeline (Linux build host).
+#[derive(Clone, Debug, Deserialize)]
+pub struct Pipeline {
+    /// Pinned kernel image (vmlinuz).
+    pub kernel: PathBuf,
+    /// initramfs carrying the stormblock client + overlay-root boot logic.
+    pub initramfs: PathBuf,
+    /// systemd-bootx64.efi.
+    pub bootloader: PathBuf,
+    /// Guest disk device the slab partition appears as (e.g. /dev/sda).
+    #[serde(default = "default_disk_device")]
+    pub disk_device: String,
+    /// `stormcos-compose` binary (produces the erofs rootfs + slab artifact).
+    #[serde(default = "def_compose_bin")]
+    pub compose_bin: String,
+    /// Layers dir consumed by `compose edition` (base + driver + edition).
+    pub layers_dir: PathBuf,
+    /// Prebuilt image-store erofs to embed as the second volume.
+    pub image_store: PathBuf,
+    /// `qemu-img` for the qcow2 conversion.
+    #[serde(default = "def_qemu_img")]
+    pub qemu_img: String,
+}
+
+fn default_disk_device() -> String {
+    "/dev/sda".into()
+}
+fn def_compose_bin() -> String {
+    "stormcos-compose".into()
+}
+fn def_qemu_img() -> String {
+    "qemu-img".into()
 }
 
 /// A build flavor — a layer in the stack. Flavors compose upward: `extends`
