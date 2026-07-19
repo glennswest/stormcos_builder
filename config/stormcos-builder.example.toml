@@ -1,0 +1,66 @@
+# stormcos-builder configuration.
+
+listen = "0.0.0.0:8080"
+data_dir = "/var/lib/stormcos-builder"   # images/, logs/, state.json
+poll_interval_secs = 300
+auto_build = true                        # rebuild affected flavors on change
+
+[dns]
+base_url = "http://192.168.8.252:8080/api/v1"   # MicroDNS
+zone_id  = "9bed60c8-1664-4183-88f9-a1a21b927edc" # g8.lo
+
+[scripts]
+build_image       = "scripts/build-image.sh"
+provision_cluster = "scripts/provision-cluster.sh"
+rebuild_machine   = "scripts/rebuild-machine.sh"
+delete_cluster    = "scripts/delete-cluster.sh"
+
+# --- assets: repos to watch ------------------------------------------------
+[[components]]
+name = "stormcos"
+repo = "glennswest/stormcos"
+[[components]]
+name = "stormblock"
+repo = "glennswest/stormblock"
+[[components]]
+name = "rspacefs"
+repo = "glennswest/rspacefs"
+[[components]]
+name = "cilium"           # placeholder for the network layer / CNI integration
+repo = "glennswest/rustkube-node"
+[[components]]
+name = "rustkube"
+repo = "glennswest/rustkube"
+[[components]]
+name = "rustkube-node"
+repo = "glennswest/rustkube-node"
+[[components]]
+name = "fastetcd"
+repo = "glennswest/fastetcd"
+[[components]]
+name = "cadvisor"
+repo = "glennswest/cadvisor"
+[[components]]
+name = "ironprom"
+repo = "glennswest/ironprom"
+[[components]]
+name = "stormcos-installer"
+repo = "glennswest/stormcos-installer"
+
+# --- flavors: layer up base -> network -> ... -> release -------------------
+[[flavors]]
+name = "base"
+description = "Minimal bootable stormcos: kernel + stormblock root + systemd"
+assets = ["stormcos", "stormblock", "rspacefs", "stormcos-installer"]
+
+[[flavors]]
+name = "network"
+description = "base + CNI/networking layer"
+extends = "base"
+assets = ["cilium"]
+
+[[flavors]]
+name = "open-stormcos"
+description = "Full open release: control plane + node agent + observability"
+extends = "network"
+assets = ["rustkube", "rustkube-node", "fastetcd", "cadvisor", "ironprom"]

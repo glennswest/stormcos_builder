@@ -1,0 +1,6 @@
+target/
+*.img
+*.qcow2
+*.iso
+.env
+config/stormcos-builder.toml
