@@ -32,6 +32,26 @@ pub struct Config {
     /// `scripts.build_image` shell script.
     #[serde(default)]
     pub pipeline: Option<Pipeline>,
+    /// QA: run the test suite after each build; tombstone on blocking failure.
+    #[serde(default)]
+    pub qa: Option<Qa>,
+}
+
+/// QA integration (stormcos_qa pulled into the builder VM).
+#[derive(Clone, Debug, Deserialize)]
+pub struct Qa {
+    /// qa-runner binary.
+    #[serde(default = "def_qa_runner")]
+    pub runner: String,
+    /// Checked-out stormcos_qa tests dir.
+    pub tests_dir: PathBuf,
+    /// File GitHub issues in owning repos on failure.
+    #[serde(default)]
+    pub file_issues: bool,
+}
+
+fn def_qa_runner() -> String {
+    "qa-runner".into()
 }
 
 /// Inputs for the in-process Rust build pipeline (Linux build host).

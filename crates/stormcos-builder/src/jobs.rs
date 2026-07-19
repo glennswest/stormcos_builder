@@ -116,6 +116,8 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
                 notes: notes.clone(),
                 artifacts,
                 targets,
+                tombstoned: false,
+                qa: None,
             });
             for (name, sha) in &shas {
                 s.last_seen.insert(name.clone(), sha.clone());
@@ -123,7 +125,81 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
         }
     })
     .await;
+
+    // QA pass over the fresh image (image-scope; cluster-scope runs post-provision).
+    if result.is_ok() {
+        run_qa(app.clone(), &id).await;
+    }
     id
+}
+
+#[derive(serde::Deserialize)]
+struct QaReport {
+    total: usize,
+    passed: usize,
+    failed: usize,
+    blocking_failures: usize,
+}
+
+/// Run qa-runner against a release's image; tombstone on blocking failure.
+async fn run_qa(app: Arc<App>, release_id: &str) {
+    let Some(qa) = &app.cfg.qa else { return };
+    // Locate the raw image artifact for image-scope tests.
+    let (image, flavor) = app
+        .read(|s| {
+            s.release(release_id).map(|r| {
+                (
+                    r.artifacts
+                        .iter()
+                        .find(|a| a.format == crate::model::Format::Img)
+                        .map(|a| a.path.clone()),
+                    r.flavor.clone(),
+                )
+            })
+        })
+        .await
+        .unwrap_or((None, String::new()));
+    let report = app
+        .cfg
+        .logs_dir()
+        .join(format!("qa-{release_id}.json"));
+    let mut args = vec![
+        "--tests-dir".to_string(),
+        qa.tests_dir.to_string_lossy().to_string(),
+        "--release".to_string(),
+        release_id.to_string(),
+        "--flavor".to_string(),
+        flavor,
+        "--report".to_string(),
+        report.to_string_lossy().to_string(),
+    ];
+    if let Some(img) = image {
+        args.push("--image".into());
+        args.push(img.to_string_lossy().to_string());
+    }
+    if qa.file_issues {
+        args.push("--file-issues".into());
+    }
+    let _ = Command::new(&qa.runner).args(&args).status().await;
+
+    let parsed: Option<QaReport> = std::fs::read(&report)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    app.mutate(|s| {
+        if let Some(r) = s.releases.iter_mut().find(|r| r.id == release_id)
+            && let Some(p) = &parsed
+        {
+            r.qa = Some(crate::model::QaResult {
+                total: p.total,
+                passed: p.passed,
+                failed: p.failed,
+                blocking_failures: p.blocking_failures,
+                report: Some(report.clone()),
+            });
+            r.tombstoned = p.blocking_failures > 0;
+        }
+    })
+    .await;
 }
 
 /// Provision a single-node cluster from a release, addressed by name/DNS.

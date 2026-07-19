@@ -37,7 +37,7 @@ const INDEX: &str = r#"<!doctype html>
 <header><h1>storm<span>cos</span> builder <span style="color:#8892b0;font-size:12px">· boot images · on-demand clusters</span></h1></header>
 <main>
  <section><h2>Flavors</h2><table id="flavors"><tbody></tbody></table></section>
- <section><h2>Releases</h2><table id="releases"><thead><tr><th>release</th><th>flavor</th><th>created</th><th>downloads</th><th>net-boot</th></tr></thead><tbody></tbody></table></section>
+ <section><h2>Releases</h2><table id="releases"><thead><tr><th>release</th><th>flavor</th><th>qa</th><th>downloads</th><th>net-boot</th></tr></thead><tbody></tbody></table></section>
  <section><h2>Provision a cluster</h2>
    <div class="row">
      <input id="cname" placeholder="name (dns-safe)" size="14">
@@ -59,9 +59,10 @@ async function refresh(){
  const sel=$('#cflavor');sel.innerHTML=fl.map(f=>`<option>${f.name}</option>`).join('');
  const rels=(await api('/releases')).releases||[];
  $('#releases tbody').innerHTML=rels.map(r=>{
-   const dl=(r.artifacts||[]).map(a=>`<a href="/api/v1/releases/${r.id}/download/${a.format}">${a.format}</a>`).join(' · ')||'<span class=tag>none</span>';
+   const dl=r.tombstoned?'<span class=tag>—</span>':((r.artifacts||[]).map(a=>`<a href="/api/v1/releases/${r.id}/download/${a.format}">${a.format}</a>`).join(' · ')||'<span class=tag>none</span>');
    const nb=(r.targets||[]).map(t=>`<span class=tag>${t.transport}</span>`).join(' ')||'<span class=tag>—</span>';
-   return `<tr><td><code>${r.id}</code></td><td>${r.flavor}</td><td class=tag>${r.created}</td><td>${dl}</td><td>${nb}</td></tr>`}).join('');
+   const q=r.tombstoned?`<span class="ph failed">tombstoned</span>`:(r.qa?`<span class="ph ready">${r.qa.passed}/${r.qa.total}</span>`:'<span class=tag>—</span>');
+   return `<tr><td><code>${r.id}</code>${r.tombstoned?'':''}</td><td>${r.flavor}</td><td>${q}</td><td>${dl}</td><td>${nb}</td></tr>`}).join('');
  const cl=(await api('/clusters')).clusters||[];
  $('#clusters tbody').innerHTML=cl.map(c=>`<tr><td><b>${c.name}</b></td><td class=tag>${c.dns_name}</td><td>${ph(c.phase)}</td><td>${c.ip||''}</td><td class=tag>${c.release_id}</td><td class=row><button onclick="rebuild('${c.name}')">Rebuild</button><button class=d onclick="del('${c.name}')">Delete</button></td></tr>`).join('');
  const bs=(await api('/builds')).builds||[];

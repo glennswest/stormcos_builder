@@ -139,10 +139,17 @@ async fn download(
 ) -> Result<Response, Err> {
     let fmt = Format::parse(&format)
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "format must be img|qcow2|iso"))?;
-    let art = app
-        .read(|s| s.release(&id).and_then(|r| r.artifact(fmt).cloned()))
+    let (art, tombstoned) = app
+        .read(|s| {
+            s.release(&id)
+                .map(|r| (r.artifact(fmt).cloned(), r.tombstoned))
+        })
         .await
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such release/format"))?;
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such release"))?;
+    if tombstoned {
+        return Err(err(StatusCode::FORBIDDEN, "release tombstoned (QA failed)"));
+    }
+    let art = art.ok_or_else(|| err(StatusCode::NOT_FOUND, "no such format"))?;
     let file = tokio::fs::File::open(&art.path)
         .await
         .map_err(|e| err(StatusCode::NOT_FOUND, format!("image file gone: {e}")))?;
@@ -190,23 +197,33 @@ async fn create_cluster(
 
     // Pick release: explicit id, else latest release of the requested flavor,
     // else the latest release overall.
+    // Never provision a tombstoned (QA-failed) release.
     let release_id = app
         .read(|s| {
             if let Some(id) = &req.release_id {
-                return s.release(id).map(|r| r.id.clone());
+                return s.release(id).filter(|r| !r.tombstoned).map(|r| r.id.clone());
             }
             if let Some(fl) = &req.flavor {
                 return s
                     .releases
                     .iter()
                     .rev()
-                    .find(|r| &r.flavor == fl)
+                    .find(|r| &r.flavor == fl && !r.tombstoned)
                     .map(|r| r.id.clone());
             }
-            s.latest_release().map(|r| r.id.clone())
+            s.releases
+                .iter()
+                .rev()
+                .find(|r| !r.tombstoned)
+                .map(|r| r.id.clone())
         })
         .await
-        .ok_or_else(|| err(StatusCode::CONFLICT, "no matching release built yet"))?;
+        .ok_or_else(|| {
+            err(
+                StatusCode::CONFLICT,
+                "no non-tombstoned release available for that selection",
+            )
+        })?;
 
     let dns = req
         .dns_name

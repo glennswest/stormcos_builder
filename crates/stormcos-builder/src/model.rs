@@ -121,6 +121,24 @@ pub struct Release {
     /// Network boot targets (iSCSI / NVMe-oF/TCP) exported for this release.
     #[serde(default)]
     pub targets: Vec<NetworkTarget>,
+    /// Set when a blocking QA test failed — the release is not offered for
+    /// download or provisioning.
+    #[serde(default)]
+    pub tombstoned: bool,
+    /// QA result (from qa-runner), if the pass ran.
+    #[serde(default)]
+    pub qa: Option<QaResult>,
+}
+
+/// Summary of a QA pass over a release (mirrors qa-runner's report).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct QaResult {
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub blocking_failures: usize,
+    #[serde(default)]
+    pub report: Option<PathBuf>,
 }
 
 impl Release {
