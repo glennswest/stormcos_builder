@@ -324,7 +324,10 @@ pub async fn watcher(app: Arc<App>) {
                         .await;
                     }
                 }
-                Err(e) => tracing::warn!("poll {}: {e}", c.repo),
+                // {e:#} prints the whole anyhow cause chain — reqwest's own
+                // Display is just "error sending request for url (...)", which
+                // hides whether it was DNS, TLS, connect or timeout.
+                Err(e) => tracing::warn!("poll {}: {e:#}", c.repo),
             }
         }
         if !changed.is_empty() && app.cfg.auto_build {
