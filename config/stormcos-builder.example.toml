@@ -86,4 +86,5 @@ assets = ["rustkube", "rustkube-node", "fastetcd", "cadvisor", "ironprom"]
 # compose_bin = "stormcos-compose"
 # layers_dir  = "/root/layers"
 # image_store = "/root/out/image-store-kubernetes.erofs"
+# editions_dir = "/root/projects/stormcos/editions"
 # qemu_img    = "qemu-img"

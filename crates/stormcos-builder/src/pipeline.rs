@@ -41,6 +41,8 @@ pub async fn build(
         &[
             "--out-dir".into(),
             ed_out.to_string_lossy().into(),
+            "--editions-dir".into(),
+            p.editions_dir.to_string_lossy().into(),
             "edition".into(),
             flavor_edition(flavor).into(),
             "--layers-dir".into(),

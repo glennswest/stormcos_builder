@@ -85,6 +85,10 @@ pub struct Pipeline {
     pub compose_bin: String,
     /// Layers dir consumed by `compose edition` (base + driver + edition).
     pub layers_dir: PathBuf,
+    /// Directory holding edition definitions (editions/<name>.toml). compose
+    /// resolves it relative to CWD by default; the builder passes it absolute
+    /// so it works regardless of the service's working directory.
+    pub editions_dir: PathBuf,
     /// Prebuilt image-store erofs to embed as the second volume.
     pub image_store: PathBuf,
     /// `qemu-img` for the qcow2 conversion.
