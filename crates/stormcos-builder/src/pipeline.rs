@@ -116,9 +116,11 @@ pub async fn build(
     })?;
     logf.line(&format!("boot-image: {} bytes", report.image_bytes));
 
-    // 4. qcow2 conversion (external qemu-img). ISO left to a later step.
+    // 4. qcow2 conversion (external qemu-img). Non-fatal: the raw img is the
+    //    primary bootable artifact, so a missing/failing qemu-img degrades to
+    //    "img only" instead of failing the whole build.
     let qcow = out_dir.join(format!("{release_id}.qcow2"));
-    run(
+    let qcow_ok = match run(
         &p.qemu_img,
         &[
             "convert".into(),
@@ -131,10 +133,20 @@ pub async fn build(
         ],
         &mut logf,
     )
-    .await?;
+    .await
+    {
+        Ok(()) => true,
+        Err(e) => {
+            logf.line(&format!("qcow2: skipped ({e}) — raw img is the artifact"));
+            false
+        }
+    };
 
     // 5. artifacts + network boot targets.
-    let mut artifacts = vec![artifact(Format::Img, &raw)?, artifact(Format::Qcow2, &qcow)?];
+    let mut artifacts = vec![artifact(Format::Img, &raw)?];
+    if qcow_ok {
+        artifacts.push(artifact(Format::Qcow2, &qcow)?);
+    }
     if let Ok(a) = artifact(Format::Iso, &out_dir.join(format!("{release_id}.iso"))) {
         artifacts.push(a); // present only if an ISO step produced one
     }
