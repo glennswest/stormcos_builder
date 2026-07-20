@@ -66,6 +66,19 @@ stormcos pipeline, provision/rebuild/delete via terragrunt + stormcos-installer
 + Proxmox). Each script has a well-known contract; the build script writes a
 manifest the service registers. Runs as a VM on Proxmox (`deploy/terragrunt/`).
 
+## Build host prerequisites
+
+The pipeline shells out to a handful of OS tools; install them once with
+**`scripts/setup-host.sh`** (dnf/apt): `qemu-img` (qcow2), `erofs-utils`
+(mkfs.erofs), `zstd`/`cpio`/`xz` (initramfs assembly). The dedicated builder VM
+runs this on first boot (cloud-init `runcmd`).
+
+Beyond packages, the `[pipeline]` paths must point at the build **inputs** —
+these are produced by the build environment, not by dnf: the pinned kernel +
+depmod'd `/lib/modules`, the composed `layers/` dir, the image-store erofs, the
+static `stormblock` binary, and the `stormcos-compose`/`stormcos-install`
+binaries. See `config/stormcos-builder.example.toml`.
+
 ## Status
 
 Early. Service + API + web UI + watcher + flavor layering compile and run; the

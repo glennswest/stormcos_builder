@@ -3,6 +3,13 @@
 # and provisions clusters. Reserved IP .59 (outside the g8 DHCP pool).
 #
 #   VMID=$(../free-vmid.sh) BUILDER_VMID=$VMID terragrunt apply
+#
+# Post-provision (once the VM is up): install the pipeline's OS tools and
+# stage the build inputs, then start the service:
+#   ssh fedora@192.168.8.59 'sudo bash' < ../../../scripts/setup-host.sh
+#   # + stage layers/, kernel modules, image-store, and the stormcos binaries
+#   #   (see the builder README "Build host prerequisites"), then run
+#   #   stormcos-builder against /etc/stormcos-builder.toml.
 
 include "root" { path = find_in_parent_folders("root.hcl") }
 
