@@ -83,6 +83,8 @@ pub async fn build(
         slab,
         volume: format!("boot-template-stormcos-{release_id}"),
         esp_mib: 256,
+        var_mib: 4096,
+        containers_mib: 8192,
         disk_device: p.disk_device.clone(),
         extra_cmdline: None,
         out: raw.clone(),
