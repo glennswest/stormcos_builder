@@ -4,6 +4,10 @@ listen = "0.0.0.0:8080"
 data_dir = "/var/lib/stormcos-builder"   # images/, logs/, state.json
 poll_interval_secs = 300
 auto_build = true                        # rebuild affected flavors on change
+keep_releases = 3                        # keep the last N releases PER FLAVOR;
+                                         # older ones (artifacts + log + record)
+                                         # are pruned automatically after each
+                                         # successful build. 0 disables.
 
 [dns]
 base_url = "http://192.168.8.252:8080/api/v1"   # MicroDNS

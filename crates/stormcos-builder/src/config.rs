@@ -17,6 +17,12 @@ pub struct Config {
     /// Auto-trigger a boot-image build when any watched component changes.
     #[serde(default)]
     pub auto_build: bool,
+    /// How many releases to keep PER FLAVOR. Older ones are pruned
+    /// automatically after each successful build — artifacts, build log and
+    /// state record. Each release is ~6.5 GB (img + qcow2), so without this a
+    /// builder with auto_build on fills its disk. 0 disables pruning.
+    #[serde(default = "default_keep_releases")]
+    pub keep_releases: usize,
     /// Assets: repos to watch. A change to one triggers a rebuild of every
     /// flavor that includes it.
     pub components: Vec<Component>,
@@ -222,6 +228,9 @@ fn default_data_dir() -> PathBuf {
 }
 fn default_poll() -> u64 {
     300
+}
+fn default_keep_releases() -> usize {
+    3
 }
 fn default_branch() -> String {
     "main".into()

@@ -129,8 +129,107 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
     // QA pass over the fresh image (image-scope; cluster-scope runs post-provision).
     if result.is_ok() {
         run_qa(app.clone(), &id).await;
+        // Reclaim disk automatically: this build's intermediates are dead the
+        // moment the image exists, and we keep only the last N releases.
+        prune_intermediates(&app, &id);
+        prune_old_releases(app.clone(), &flavor).await;
     }
     id
+}
+
+/// Delete a finished build's intermediate working dirs/files. These are pure
+/// scratch — the edition staging tree, the slab artifact dir, and the initramfs
+/// assembly steps — and together they dwarf the artifacts we actually keep.
+fn prune_intermediates(app: &Arc<App>, release_id: &str) {
+    let images = app.cfg.images_dir();
+    let dirs = [
+        format!("edition-{release_id}"),
+        format!("vol-{release_id}"),
+        format!("irfs-{release_id}"),
+    ];
+    let files = [
+        format!("base-initramfs-{release_id}.img"),
+        format!("initramfs-meta-{release_id}.img"),
+        format!("initramfs-{release_id}.img"),
+    ];
+    for d in &dirs {
+        let p = images.join(d);
+        if p.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&p) {
+                tracing::warn!("prune {}: {e}", p.display());
+            }
+        }
+    }
+    for f in &files {
+        let p = images.join(f);
+        if p.is_file() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+}
+
+/// Keep only the newest `keep_releases` releases for `flavor`; delete the rest
+/// (artifacts, build log, and state record). Per-flavor so a rarely-built
+/// flavor isn't evicted by a busy one.
+async fn prune_old_releases(app: Arc<App>, flavor: &str) {
+    let keep = app.cfg.keep_releases;
+    if keep == 0 {
+        return; // pruning disabled
+    }
+
+    // Newest-first within this flavor; `created` is RFC3339 so it sorts lexically.
+    let doomed: Vec<String> = app
+        .read(|s| {
+            let mut mine: Vec<&Release> =
+                s.releases.iter().filter(|r| r.flavor == flavor).collect();
+            mine.sort_by(|a, b| b.created.cmp(&a.created));
+            mine.into_iter()
+                .skip(keep)
+                .map(|r| r.id.clone())
+                .collect()
+        })
+        .await;
+    if doomed.is_empty() {
+        return;
+    }
+
+    // Remove files first, then the records — a record without its artifacts
+    // would advertise a download that 404s.
+    let paths: Vec<std::path::PathBuf> = app
+        .read(|s| {
+            s.releases
+                .iter()
+                .filter(|r| doomed.contains(&r.id))
+                .flat_map(|r| r.artifacts.iter().map(|a| a.path.clone()))
+                .collect()
+        })
+        .await;
+    let mut freed = 0u64;
+    for p in paths {
+        if let Ok(md) = std::fs::metadata(&p) {
+            freed += md.len();
+        }
+        if let Err(e) = std::fs::remove_file(&p) {
+            tracing::warn!("prune artifact {}: {e}", p.display());
+        }
+    }
+    for id in &doomed {
+        let log = app.cfg.logs_dir().join(format!("build-{id}.log"));
+        let _ = std::fs::remove_file(&log);
+        prune_intermediates(&app, id);
+    }
+
+    app.mutate(|s| {
+        s.releases.retain(|r| !doomed.contains(&r.id));
+        s.builds.retain(|b| !doomed.contains(&b.id));
+    })
+    .await;
+
+    tracing::info!(
+        "pruned {} old {flavor} release(s), freed {:.1} GB (keep_releases={keep})",
+        doomed.len(),
+        freed as f64 / (1024.0 * 1024.0 * 1024.0)
+    );
 }
 
 #[derive(serde::Deserialize)]
