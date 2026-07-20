@@ -129,12 +129,106 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
     // QA pass over the fresh image (image-scope; cluster-scope runs post-provision).
     if result.is_ok() {
         run_qa(app.clone(), &id).await;
-        // Reclaim disk automatically: this build's intermediates are dead the
-        // moment the image exists, and we keep only the last N releases.
-        prune_intermediates(&app, &id);
+        // Reclaim disk automatically: intermediates are dead the moment the
+        // image exists (for EVERY finished build, not just this one), and we
+        // keep only the last N releases.
+        sweep_intermediates(app.clone()).await;
         prune_old_releases(app.clone(), &flavor).await;
     }
     id
+}
+
+/// Intermediate name prefixes in images/. Everything matching these is scratch
+/// produced during a build; only `<release>.img/.qcow2/.iso` are keepers.
+const INTERMEDIATE_PREFIXES: [&str; 6] = [
+    "edition-",
+    "vol-",
+    "irfs-",
+    "base-initramfs-",
+    "initramfs-meta-",
+    "initramfs-",
+];
+
+/// Sweep intermediates left by ANY finished build, not just the one that just
+/// ran. Intermediates of a *kept* release are still scratch, and builds made
+/// before pruning existed leave theirs behind forever otherwise.
+///
+/// Skips anything belonging to a build that is still running, so a concurrent
+/// build never has its working dirs pulled out from under it.
+async fn sweep_intermediates(app: Arc<App>) {
+    let running: Vec<String> = app
+        .read(|s| {
+            s.builds
+                .iter()
+                .filter(|b| matches!(b.status, Status::Running))
+                .map(|b| b.id.clone())
+                .collect()
+        })
+        .await;
+    // Safety net: never delete a file some release advertises for download,
+    // whatever its name looks like (a flavor named "edition"/"vol" would
+    // otherwise collide with an intermediate prefix).
+    let keep: Vec<std::path::PathBuf> = app
+        .read(|s| {
+            s.releases
+                .iter()
+                .flat_map(|r| r.artifacts.iter().map(|a| a.path.clone()))
+                .collect()
+        })
+        .await;
+
+    let images = app.cfg.images_dir();
+    let Ok(entries) = std::fs::read_dir(&images) else {
+        return;
+    };
+    let mut freed = 0u64;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(pfx) = INTERMEDIATE_PREFIXES
+            .iter()
+            .find(|p| name.starts_with(**p))
+        else {
+            continue;
+        };
+        // `<prefix><release-id>` (dirs) or `<prefix><release-id>.img` (files).
+        let id = name[pfx.len()..].trim_end_matches(".img");
+        if running.iter().any(|r| r == id) {
+            continue;
+        }
+        let p = e.path();
+        if keep.iter().any(|k| *k == p) {
+            continue; // a real, downloadable release artifact
+        }
+        freed += dir_size(&p);
+        let r = if p.is_dir() {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
+        if let Err(err) = r {
+            tracing::warn!("sweep {}: {err}", p.display());
+        }
+    }
+    if freed > 0 {
+        tracing::info!(
+            "swept build intermediates, freed {:.1} GB",
+            freed as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
+    }
+}
+
+/// Apparent size of a file or directory tree (best-effort, for logging).
+fn dir_size(p: &std::path::Path) -> u64 {
+    let Ok(md) = std::fs::metadata(p) else {
+        return 0;
+    };
+    if md.is_file() {
+        return md.len();
+    }
+    let Ok(entries) = std::fs::read_dir(p) else {
+        return 0;
+    };
+    entries.flatten().map(|e| dir_size(&e.path())).sum()
 }
 
 /// Delete a finished build's intermediate working dirs/files. These are pure
