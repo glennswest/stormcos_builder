@@ -66,6 +66,13 @@ pub async fn build(
             p.image_store.to_string_lossy().into(),
             "--release".into(),
             release_id.into(),
+            // Writable per-node state as stormblock THIN volumes (grow their
+            // backing independently; auto-expand on pressure) — not disk
+            // partitions (which only grow the last one).
+            "--var-gib".into(),
+            "8".into(),
+            "--containers-gib".into(),
+            "20".into(),
         ],
         &mut logf,
     )
@@ -83,8 +90,19 @@ pub async fn build(
         slab,
         volume: format!("boot-template-stormcos-{release_id}"),
         esp_mib: 256,
-        var_mib: 4096,
-        containers_mib: 8192,
+        // Thin /var + /var/lib/containers volumes (names match compose's
+        // var_volume_name / containers_volume_name); the initramfs exports and
+        // systemd mounts them over the read-only erofs root.
+        writable: vec![
+            stormcos_install::bootimage::WritableMount {
+                volume: format!("var-stormcos-{release_id}"),
+                mount: "/var".into(),
+            },
+            stormcos_install::bootimage::WritableMount {
+                volume: format!("containers-stormcos-{release_id}"),
+                mount: "/var/lib/containers".into(),
+            },
+        ],
         disk_device: p.disk_device.clone(),
         extra_cmdline: None,
         out: raw.clone(),

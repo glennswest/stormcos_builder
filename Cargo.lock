@@ -340,7 +340,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -960,7 +960,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1281,7 +1281,7 @@ dependencies = [
 [[package]]
 name = "stormcos-install"
 version = "0.1.0"
-source = "git+https://github.com/glennswest/stormcos-installer?rev=01686c8#01686c8217afdba015dad6d67343037b4e7a2fb2"
+source = "git+https://github.com/glennswest/stormcos-installer?rev=efd282b#efd282b01620fed1c681e7bd350b7248324ef936"
 dependencies = [
  "anyhow",
  "clap",
