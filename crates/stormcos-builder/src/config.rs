@@ -59,8 +59,22 @@ fn def_qa_runner() -> String {
 pub struct Pipeline {
     /// Pinned kernel image (vmlinuz).
     pub kernel: PathBuf,
-    /// initramfs carrying the stormblock client + overlay-root boot logic.
+    /// The BASE stormblock initramfs (busybox + static stormblock + LinuxBoot
+    /// init). The pipeline assembles the final boot initramfs from this per
+    /// build: inject the artifact's volumes.dat, then the storage modules.
     pub initramfs: PathBuf,
+    /// stormcos-initramfs.sh — injects the decompressed storage/fs modules.
+    pub initramfs_sh: PathBuf,
+    /// A depmod'd /lib/modules/<kver> dir the module injector reads from.
+    pub modules_dir: PathBuf,
+    /// Kernel version string (the <kver> under modules_dir).
+    pub kver: String,
+    /// Optional: rebuild the base stormblock initramfs first (when stormblock
+    /// changed). build-stormblock-initramfs.sh + the static stormblock binary.
+    #[serde(default)]
+    pub stormblock_initramfs_sh: Option<PathBuf>,
+    #[serde(default)]
+    pub stormblock_bin: Option<PathBuf>,
     /// systemd-bootx64.efi.
     pub bootloader: PathBuf,
     /// Guest disk device the slab partition appears as (e.g. /dev/sda).

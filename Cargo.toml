@@ -23,7 +23,7 @@ tracing-subscriber = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 
-stormcos-install = { git = "https://github.com/glennswest/stormcos-installer", rev = "efd282b" }
+stormcos-install = { git = "https://github.com/glennswest/stormcos-installer", rev = "81b7922" }
 
 [profile.release]
 lto = true

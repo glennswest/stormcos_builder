@@ -72,7 +72,15 @@ assets = ["rustkube", "rustkube-node", "fastetcd", "cadvisor", "ironprom"]
 # section to fall back to scripts.build_image.
 # [pipeline]
 # kernel      = "/root/kver/x/lib/modules/6.12.0-211.34.1.el10_2.x86_64/vmlinuz"
-# initramfs   = "/root/stormcos-initramfs-ci.img"
+# # BASE stormblock initramfs; the pipeline injects this build's volumes.dat +
+# # storage modules into a copy of it per build.
+# initramfs   = "/root/stormcos-initramfs.img"
+# initramfs_sh = "/root/projects/stormcos-installer/scripts/stormcos-initramfs.sh"
+# modules_dir = "/root/kver/x/lib/modules/6.12.0-211.34.1.el10_2.x86_64"
+# kver        = "6.12.0-211.34.1.el10_2.x86_64"
+# # Optional: rebuild the base initramfs when stormblock changes.
+# stormblock_initramfs_sh = "/root/projects/stormblock/scripts/build-stormblock-initramfs.sh"
+# stormblock_bin = "/root/projects/stormblock/target/x86_64-unknown-linux-musl/release/stormblock"
 # bootloader  = "/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
 # disk_device = "/dev/sda"
 # compose_bin = "stormcos-compose"

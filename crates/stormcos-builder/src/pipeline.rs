@@ -77,15 +77,20 @@ pub async fn build(
         &mut logf,
     )
     .await?;
-    let slab = vol_out
-        .join(format!("image-volume-{release_id}/root.slab"));
+    let art_dir = vol_out.join(format!("image-volume-{release_id}"));
+    let slab = art_dir.join("root.slab");
 
-    // 3. boot image — IN-PROCESS via the stormcos-install library.
+    // 3. assemble THIS build's boot initramfs (parity with rebuild-ci.sh):
+    //    optional base rebuild -> inject the artifact's volumes.dat so the node
+    //    restores its volumes by name -> inject the storage modules.
+    let initramfs = assemble_initramfs(p, &art_dir, out_dir, release_id, &mut logf).await?;
+
+    // 4. boot image — IN-PROCESS via the stormcos-install library.
     let raw = out_dir.join(format!("{release_id}.img"));
     logf.line("boot-image: in-process (stormcos_install::bootimage)");
     let report = stormcos_install::bootimage::build(&stormcos_install::bootimage::BootImageSpec {
         kernel: p.kernel.clone(),
-        initramfs: p.initramfs.clone(),
+        initramfs,
         bootloader: p.bootloader.clone(),
         slab,
         volume: format!("boot-template-stormcos-{release_id}"),
@@ -148,6 +153,83 @@ pub async fn build(
     ];
     logf.line("pipeline: done");
     Ok((artifacts, targets))
+}
+
+/// Assemble this build's boot initramfs — the same three moves rebuild-ci.sh
+/// makes so the produced image actually boots:
+///   0 (optional) rebuild the base stormblock initramfs when a new stormblock
+///     binary is configured (its boot-local + LinuxBoot init change per build);
+///   3a inject the artifact's meta/volumes.dat under etc/stormblock/meta so the
+///      node restores THIS build's template + writable volumes by name;
+///   3b inject the decompressed storage/fs modules (stormcos-initramfs.sh).
+async fn assemble_initramfs(
+    p: &Pipeline,
+    art_dir: &Path,
+    out_dir: &Path,
+    release_id: &str,
+    logf: &mut LogFile,
+) -> anyhow::Result<PathBuf> {
+    // 0. optional base rebuild.
+    let base = match (&p.stormblock_initramfs_sh, &p.stormblock_bin) {
+        (Some(sh), Some(bin)) => {
+            let base = out_dir.join(format!("base-initramfs-{release_id}.img"));
+            logf.line("initramfs: rebuild base (stormblock changed)");
+            run(
+                "bash",
+                &[
+                    sh.to_string_lossy().into(),
+                    bin.to_string_lossy().into(),
+                    p.kver.clone(),
+                    base.to_string_lossy().into(),
+                ],
+                logf,
+            )
+            .await?;
+            base
+        }
+        _ => p.initramfs.clone(),
+    };
+
+    // 3a. inject the artifact's volumes.dat into a copy of the base cpio.
+    let staged = out_dir.join(format!("initramfs-meta-{release_id}.img"));
+    let volumes_dat = art_dir.join("meta/volumes.dat");
+    anyhow::ensure!(
+        volumes_dat.is_file(),
+        "artifact meta missing: {}",
+        volumes_dat.display()
+    );
+    logf.line("initramfs: inject artifact meta (volumes.dat)");
+    // busybox-compatible: unpack, drop volumes.dat under etc/stormblock/meta,
+    // repack. Done via a shell one-liner so it matches rebuild-ci exactly.
+    let work = out_dir.join(format!("irfs-{release_id}"));
+    let script = format!(
+        "set -e; rm -rf {w}; mkdir -p {w}; cd {w}; \
+         zstd -dc {base} | cpio -idm --quiet; \
+         mkdir -p etc/stormblock/meta; cp {vd} etc/stormblock/meta/; \
+         find . | cpio -o -H newc --quiet | zstd -19 -T0 -q > {out}",
+        w = work.to_string_lossy(),
+        base = base.to_string_lossy(),
+        vd = volumes_dat.to_string_lossy(),
+        out = staged.to_string_lossy(),
+    );
+    run("bash", &["-c".into(), script], logf).await?;
+
+    // 3b. inject storage/fs modules -> final initramfs.
+    let final_img = out_dir.join(format!("initramfs-{release_id}.img"));
+    logf.line("initramfs: inject storage modules");
+    run(
+        "bash",
+        &[
+            p.initramfs_sh.to_string_lossy().into(),
+            staged.to_string_lossy().into(),
+            p.kver.clone(),
+            p.modules_dir.to_string_lossy().into(),
+            final_img.to_string_lossy().into(),
+        ],
+        logf,
+    )
+    .await?;
+    Ok(final_img)
 }
 
 /// Flavors compose the same "kubernetes" edition today; a flavor selects its
@@ -224,7 +306,3 @@ fn local_ip() -> String {
         })
         .unwrap_or_else(|| "127.0.0.1".into())
 }
-
-// Silence unused on non-pipeline builds.
-#[allow(dead_code)]
-fn _p(_: &Pipeline, _: PathBuf) {}
