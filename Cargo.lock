@@ -1281,7 +1281,7 @@ dependencies = [
 [[package]]
 name = "stormcos-install"
 version = "0.1.0"
-source = "git+https://github.com/glennswest/stormcos-installer?rev=81b7922#81b7922d4c76d1a89452cc9fab4a5c89065d06f6"
+source = "git+https://github.com/glennswest/stormcos-installer?rev=6371994#637199452e477913ab6dd082fd080839a56a50e1"
 dependencies = [
  "anyhow",
  "clap",

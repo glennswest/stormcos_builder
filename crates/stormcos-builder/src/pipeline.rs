@@ -97,6 +97,9 @@ pub async fn build(
         slab,
         volume: format!("boot-template-stormcos-{release_id}"),
         esp_mib: 256,
+        // Export the preloaded store so CRI-O can actually see the images we
+        // packed in at build time (name matches compose's image_store_volume_name).
+        image_store: Some(format!("image-store-stormcos-{release_id}")),
         // Thin /var + /var/lib/containers volumes (names match compose's
         // var_volume_name / containers_volume_name); the initramfs exports and
         // systemd mounts them over the read-only erofs root.
