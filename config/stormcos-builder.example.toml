@@ -30,8 +30,8 @@ repo = "glennswest/stormblock"
 name = "rspacefs"
 repo = "glennswest/rspacefs"
 [[components]]
-name = "cilium"           # placeholder for the network layer / CNI integration
-repo = "glennswest/rustkube-node"
+name = "network-operator" # our Cluster Network Operator — owns Cilium's lifecycle
+repo = "glennswest/network-operator"
 [[components]]
 name = "rustkube"
 repo = "glennswest/rustkube"
@@ -59,9 +59,9 @@ assets = ["stormcos", "stormblock", "rspacefs", "stormcos-installer"]
 
 [[flavors]]
 name = "network"
-description = "base + CNI/networking layer"
+description = "base + CNI/networking layer (Cilium via network-operator)"
 extends = "base"
-assets = ["cilium"]
+assets = ["network-operator"]
 
 [[flavors]]
 name = "open-stormcos"
