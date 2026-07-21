@@ -51,23 +51,28 @@ repo = "glennswest/ironprom"
 name = "stormcos-installer"
 repo = "glennswest/stormcos-installer"
 
-# --- flavors: layer up base -> network -> ... -> release -------------------
+# --- flavor: ONE node image -------------------------------------------------
+# stormcos ships a single node image by design — editions/kubernetes.toml:
+# "the platform's one node image ... Node roles (control plane, stormblock
+# server, stormfork host) are activated per node by the TOML manifest — the
+# image carries all role components."
+#
+# The previous base -> network -> open-stormcos layering built the SAME edition
+# from the SAME layers three times (flavor_edition() returned "kubernetes"
+# regardless), so it produced three byte-equivalent images, tripling build time
+# and storage for nothing. Roles are a runtime manifest concern, not a build
+# concern.
+#
+# A second flavor should only ever exist if it genuinely composes a DIFFERENT
+# edition (a different layer stack) — not to express a role.
 [[flavors]]
-name = "base"
-description = "Minimal bootable stormcos: kernel + stormblock root + systemd"
-assets = ["stormcos", "stormblock", "rspacefs", "stormcos-installer"]
-
-[[flavors]]
-name = "network"
-description = "base + CNI/networking layer (Cilium via network-operator)"
-extends = "base"
-assets = ["network-operator"]
-
-[[flavors]]
-name = "open-stormcos"
-description = "Full open release: control plane + node agent + observability"
-extends = "network"
-assets = ["rustkube", "rustkube-node", "fastetcd", "cadvisor", "ironprom"]
+name = "stormcos"
+description = "The stormcos node image: all role components; roles activated per node by manifest"
+assets = [
+    "stormcos", "stormblock", "rspacefs", "stormcos-installer",
+    "network-operator", "rustkube", "rustkube-node", "fastetcd",
+    "cadvisor", "ironprom",
+]
 
 # --- in-process Rust build pipeline (Linux build host) --------------------
 # When present, build-image runs in Rust: stormcos-install's boot-image

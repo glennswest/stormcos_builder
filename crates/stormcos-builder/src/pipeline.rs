@@ -286,8 +286,13 @@ async fn assemble_initramfs(
     Ok(final_img)
 }
 
-/// Flavors compose the same "kubernetes" edition today; a flavor selects its
-/// asset subset via the layers it's built from. (Future: per-flavor editions.)
+/// The edition a flavor composes.
+///
+/// stormcos ships ONE node image (editions/kubernetes.toml: "the platform's one
+/// node image"), with roles activated per node by manifest — so there is
+/// normally one flavor and it maps to the kubernetes edition. A second flavor is
+/// only meaningful if it composes a genuinely different edition; expressing a
+/// *role* as a flavor just rebuilds identical bytes under another name.
 fn flavor_edition(_flavor: &str) -> &'static str {
     "kubernetes"
 }
