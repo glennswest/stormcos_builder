@@ -11,6 +11,13 @@ bootable `iso`, plus network **boot targets** over **iSCSI** and
 **NVMe-oF/TCP** (the root-on-stormblock netboot path). Everything storm-native
 and Rust (axum).
 
+> **Architecture is being reworked.** The builder is moving from a shared-host
+> commit-watcher to an **issue-driven reconciler** that builds in disposable LXC
+> clones (`../devlxc`) and harvests component **releases** instead of building
+> from frozen staged inputs. See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the
+> target design and the migration issues.
+
+
 ## Flavors (layer up to a release)
 
 A flavor is a layer. Flavors compose upward via `extends`, so you build up
