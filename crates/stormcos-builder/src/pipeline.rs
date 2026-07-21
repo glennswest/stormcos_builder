@@ -71,10 +71,13 @@ pub async fn build(
             // Writable per-node state as stormblock THIN volumes (grow their
             // backing independently; auto-expand on pressure) — not disk
             // partitions (which only grow the last one).
+            // Baseline size set (docs/STORAGE.md). Virtual sizes are free —
+            // thin volumes cost nothing until written — so size them for a
+            // real node rather than an artificial wall.
             "--var-gib".into(),
-            "8".into(),
+            "32".into(),
             "--containers-gib".into(),
-            "20".into(),
+            "64".into(),
         ],
         &mut logf,
     )
