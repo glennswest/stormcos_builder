@@ -19,6 +19,10 @@ pub enum Format {
     Qcow2,
     /// Bootable ISO (UEFI El Torito).
     Iso,
+    /// zstd-compressed raw image — what you publish for bare-metal `dd`.
+    /// FCOS/RHCOS ship `.raw.xz` for the same reason: a raw image is mostly
+    /// unallocated reserve, so shipping it uncompressed wastes ~5x.
+    RawZst,
 }
 
 impl Format {
@@ -27,6 +31,7 @@ impl Format {
             "img" | "raw" => Some(Self::Img),
             "qcow2" | "qcow" => Some(Self::Qcow2),
             "iso" => Some(Self::Iso),
+            "raw.zst" | "rawzst" | "zst" => Some(Self::RawZst),
             _ => None,
         }
     }
@@ -35,11 +40,13 @@ impl Format {
             Self::Img => "img",
             Self::Qcow2 => "qcow2",
             Self::Iso => "iso",
+            Self::RawZst => "raw.zst",
         }
     }
     pub fn content_type(self) -> &'static str {
         match self {
             Self::Iso => "application/x-iso9660-image",
+            Self::RawZst => "application/zstd",
             _ => "application/octet-stream",
         }
     }

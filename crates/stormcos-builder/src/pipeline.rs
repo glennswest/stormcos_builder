@@ -122,18 +122,15 @@ pub async fn build(
     })?;
     logf.line(&format!("boot-image: {} bytes", report.image_bytes));
 
-    // 4. qcow2 conversion (external qemu-img). Non-fatal: the raw img is the
-    //    primary bootable artifact, so a missing/failing qemu-img degrades to
-    //    "img only" instead of failing the whole build.
+    // 5. Publishable forms. The raw image is ~5x unallocated reserve, so it is
+    //    never what we ship: qcow2 for VMs/boot-test (Proxmox and libvirt boot
+    //    it directly and it drops zero clusters structurally), zstd raw for
+    //    bare-metal `dd`. Same split FCOS/RHCOS use (.qcow2 + .raw.xz).
     let qcow = out_dir.join(format!("{release_id}.qcow2"));
     let qcow_ok = match run(
         &p.qemu_img,
         &[
-            "convert".into(),
-            "-f".into(),
-            "raw".into(),
-            "-O".into(),
-            "qcow2".into(),
+            "convert".into(), "-f".into(), "raw".into(), "-O".into(), "qcow2".into(),
             raw.to_string_lossy().into(),
             qcow.to_string_lossy().into(),
         ],
@@ -143,15 +140,52 @@ pub async fn build(
     {
         Ok(()) => true,
         Err(e) => {
-            logf.line(&format!("qcow2: skipped ({e}) — raw img is the artifact"));
+            logf.line(&format!("qcow2: skipped ({e})"));
             false
         }
     };
 
+    let rawzst = out_dir.join(format!("{release_id}.raw.zst"));
+    let zst_ok = match run(
+        "zstd",
+        &[
+            "-3".into(), "-T0".into(), "-q".into(), "-f".into(),
+            raw.to_string_lossy().into(),
+            "-o".into(),
+            rawzst.to_string_lossy().into(),
+        ],
+        &mut logf,
+    )
+    .await
+    {
+        Ok(()) => true,
+        Err(e) => {
+            logf.line(&format!("raw.zst: skipped ({e})"));
+            false
+        }
+    };
+
+    // Drop the uncompressed raw once both publishable forms exist — it is the
+    // single largest thing on disk and nothing consumes it directly.
+    if qcow_ok && zst_ok {
+        if let Err(e) = std::fs::remove_file(&raw) {
+            logf.line(&format!("raw: could not remove ({e})"));
+        } else {
+            logf.line("raw: removed (superseded by qcow2 + raw.zst)");
+        }
+    }
+
     // 5. artifacts + network boot targets.
-    let mut artifacts = vec![artifact(Format::Img, &raw)?];
+    let mut artifacts = Vec::new();
     if qcow_ok {
         artifacts.push(artifact(Format::Qcow2, &qcow)?);
+    }
+    if zst_ok {
+        artifacts.push(artifact(Format::RawZst, &rawzst)?);
+    }
+    // Only if we could not produce a compressed form does the raw ship.
+    if !qcow_ok && !zst_ok {
+        artifacts.push(artifact(Format::Img, &raw)?);
     }
     if let Ok(a) = artifact(Format::Iso, &out_dir.join(format!("{release_id}.iso"))) {
         artifacts.push(a); // present only if an ISO step produced one
