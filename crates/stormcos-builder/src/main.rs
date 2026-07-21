@@ -10,6 +10,8 @@ mod github;
 mod jobs;
 mod model;
 mod pipeline;
+#[allow(dead_code)]
+mod reconcile;
 mod web;
 
 use std::sync::Arc;
