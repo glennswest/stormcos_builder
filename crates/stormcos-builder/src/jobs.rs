@@ -76,13 +76,13 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
     let manifest = images.join(format!("{id}.manifest.json"));
 
     // Build path preference:
-    //   1. devct  — ephemeral throwaway LXC (pull/build/push/delete); the ublk
-    //      slab assembly runs in the serialized block profile. No persistent host.
+    //   1. buildvm — ephemeral Proxmox VM cloned from the golden template (own
+    //      kernel: native ublk, no privilege, no serialization). No persistent host.
     //   2. in-process Rust pipeline (legacy persistent-host path).
     //   3. the build-image shell script.
     let result: anyhow::Result<(Vec<Artifact>, Vec<NetworkTarget>)> =
-        if let Some(dc) = &app.cfg.devct {
-            crate::devct_build::build(&app.cfg, dc, &flavor, &id, &images, &log).await
+        if let Some(dc) = &app.cfg.buildvm {
+            crate::buildvm_build::build(&app.cfg, dc, &flavor, &id, &images, &log).await
         } else if app.cfg.pipeline.is_some() {
             crate::pipeline::build(&app.cfg, &flavor, &id, &images, &log).await
         } else {
@@ -103,21 +103,22 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
             })
         };
 
-    // On failure, file an issue on the repo whose code we built (config.devct.repo)
+    // On failure, file an issue on the repo whose code we built (config.buildvm.repo)
     // — including when that is the builder's own repo. Mirrors component-builder's
     // originator routing. Best-effort; a filing error never masks the build error.
-    if let (Err(err), Some(dc)) = (&result, &app.cfg.devct) {
+    if let (Err(err), Some(bc)) = (&result, &app.cfg.buildvm) {
         let title = format!("build failed: {id}");
         let body = format!(
-            "Build `{id}` (flavor `{flavor}`) failed in a devct `{}` container.\n\n\
+            "Build `{id}` (flavor `{flavor}`) failed in an ephemeral build VM \
+             (clone of template {}).\n\n\
              **Reason:** {reason}\n\n**Error:**\n```\n{err:#}\n```\n\n\
              Log: `{}` on the builder.",
-            dc.profile,
+            bc.template,
             log.display()
         );
-        match app.gh.create_issue(&dc.repo, &title, &body).await {
-            Ok(url) => tracing::info!("filed build-failure issue on {}: {url}", dc.repo),
-            Err(e) => tracing::warn!("could not file build-failure issue on {}: {e:#}", dc.repo),
+        match app.gh.create_issue(&bc.repo, &title, &body).await {
+            Ok(url) => tracing::info!("filed build-failure issue on {}: {url}", bc.repo),
+            Err(e) => tracing::warn!("could not file build-failure issue on {}: {e:#}", bc.repo),
         }
     }
 

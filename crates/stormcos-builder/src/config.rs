@@ -41,52 +41,50 @@ pub struct Config {
     /// QA: run the test suite after each build; tombstone on blocking failure.
     #[serde(default)]
     pub qa: Option<Qa>,
-    /// devct: run the image assembly in an ephemeral Proxmox LXC instead of on a
-    /// persistent host. When set, the build runs in a throwaway container that
-    /// pulls the repo, builds, publishes, and is destroyed.
+    /// buildvm: run the image build in an ephemeral Proxmox VM cloned from a
+    /// golden template. When set, the build clones the template, runs the builder
+    /// inside it (own kernel → native ublk), and destroys the clone.
     #[serde(default)]
-    pub devct: Option<Devct>,
+    pub buildvm: Option<BuildVm>,
 }
 
-/// devct build integration — the ublk image assembly runs in an ephemeral,
-/// throwaway Proxmox LXC (block profile, serialized to one global slot) rather
-/// than on a persistent build box. A build failure files an issue on `repo`
-/// (the repo whose code the container built).
+/// Build-VM integration — the image build runs in an ephemeral Proxmox VM,
+/// linked-CoW-cloned from a sealed golden template on flash (own kernel, so ublk
+/// needs no privilege and no serialization) and destroyed after. A build failure
+/// files an issue on `repo` (the repo whose code the VM built).
 #[derive(Clone, Debug, Deserialize)]
-pub struct Devct {
+pub struct BuildVm {
     /// Proxmox API base, e.g. https://pve.g8.lo:8006/api2/json
     pub api: String,
     /// Proxmox node name, e.g. pve
     pub node: String,
-    /// Forced-command SSH endpoint for block work (host-root ublk operations).
-    #[serde(default = "def_devct_ssh")]
-    pub ssh_host: String,
     /// PVE API token value (`builder@pve!fleet=<secret>`); when empty, falls
     /// back to $DEVCT_TOKEN / $PROXMOX_API_TOKEN.
     #[serde(default)]
     pub token: String,
-    /// The repo whose code the container builds. A build failure files an issue
-    /// here — including when it is the builder's own repo.
+    /// The repo whose code the VM builds. A build failure files an issue here —
+    /// including when it is the builder's own repo.
     pub repo: String,
-    /// Profile: "block" (ublk/stormblock slab assembly — serialized) or
-    /// "compile" (parallel). The image build needs ublk, so "block".
-    #[serde(default = "def_devct_profile")]
-    pub profile: String,
-    /// The builder binary to run inside the container (`stormcos-builder build
-    /// ...` — the same Rust pipeline, not a shell script). Defaults to the
-    /// running coordinator's own executable, copied into the container.
+    /// The sealed golden template VMID to clone (e.g. 9002).
+    pub template: u64,
+    /// SSH user baked into the template image (default `fedora`).
+    #[serde(default = "def_bvm_user")]
+    pub ssh_user: String,
+    /// Private key that reaches the clone as `ssh_user`.
+    pub ssh_key: PathBuf,
+    /// The builder binary to run inside the VM (`stormcos-builder build ...` —
+    /// the same Rust pipeline). Defaults to the coordinator's own executable.
     #[serde(default)]
     pub builder_bin: Option<PathBuf>,
-    /// The config the in-container `build` uses (its [pipeline] inputs are
-    /// container paths). Staged into the container.
-    pub ct_config: PathBuf,
-    #[serde(default = "def_devct_cores")]
+    /// The config the in-VM `build` uses (its [pipeline] inputs are VM paths).
+    pub vm_config: PathBuf,
+    #[serde(default = "def_bvm_cores")]
     pub cores: u32,
-    #[serde(default = "def_devct_mem")]
+    #[serde(default = "def_bvm_mem")]
     pub memory_mb: u32,
 }
 
-impl Devct {
+impl BuildVm {
     /// Effective token: config value, else $DEVCT_TOKEN / $PROXMOX_API_TOKEN.
     pub fn token(&self) -> String {
         if !self.token.is_empty() {
@@ -98,16 +96,13 @@ impl Devct {
     }
 }
 
-fn def_devct_ssh() -> String {
-    "root@pve.g8.lo".into()
+fn def_bvm_user() -> String {
+    "fedora".into()
 }
-fn def_devct_profile() -> String {
-    "block".into()
-}
-fn def_devct_cores() -> u32 {
+fn def_bvm_cores() -> u32 {
     8
 }
-fn def_devct_mem() -> u32 {
+fn def_bvm_mem() -> u32 {
     16384
 }
 

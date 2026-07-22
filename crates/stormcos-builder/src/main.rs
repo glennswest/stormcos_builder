@@ -10,7 +10,7 @@ mod github;
 mod jobs;
 mod model;
 mod pipeline;
-mod devct_build;
+mod buildvm_build;
 #[allow(dead_code)]
 mod reconcile;
 mod web;
@@ -104,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     // `stormcos-builder build ...` runs a one-shot image build (the SAME Rust
     // pipeline the service uses) and exits. This is the entrypoint the ephemeral
-    // devct container runs — the build is the builder's job, in Rust, not a shell
+    // build VM runs — the build is the builder's job, in Rust, not a shell
     // script. Without a subcommand, arg[1] is the config path and we run the
     // coordinator service.
     if args.get(1).map(String::as_str) == Some("build") {
@@ -143,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
 /// One-shot build: `stormcos-builder build --config C --flavor F --release R --out O`.
 /// Runs the in-process Rust pipeline (the same `pipeline::build` the service uses)
 /// and writes `<out>/manifest.json` describing the artifacts. This is what the
-/// throwaway devct container runs — no shell build script. Publishing (release
+/// throwaway build VM runs — no shell build script. Publishing (release
 /// upload) is done by the caller from the manifest, or added here later.
 async fn build_command(args: &[String]) -> anyhow::Result<()> {
     let mut cfg_path = "config/stormcos-builder.toml".to_string();
