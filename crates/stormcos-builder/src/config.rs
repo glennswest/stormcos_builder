@@ -67,7 +67,8 @@ pub struct BuildVm {
     pub repo: String,
     /// The sealed golden template VMID to clone (e.g. 9002).
     pub template: u64,
-    /// SSH user baked into the template image (default `fedora`).
+    /// SSH user baked into the template image (default `storm` — the golden
+    /// template's standard build login).
     #[serde(default = "def_bvm_user")]
     pub ssh_user: String,
     /// Private key that reaches the clone as `ssh_user`.
@@ -97,7 +98,7 @@ impl BuildVm {
 }
 
 fn def_bvm_user() -> String {
-    "fedora".into()
+    "storm".into()
 }
 fn def_bvm_cores() -> u32 {
     8
