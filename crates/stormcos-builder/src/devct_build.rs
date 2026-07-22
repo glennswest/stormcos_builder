@@ -86,7 +86,24 @@ async fn run_in_container(
         c
     };
 
-    // 2a. stage the in-container build entrypoint.
+    // 2a. wait for sshd — the container gets its DHCP lease before sshd is
+    // listening, so scp/ssh immediately after create races and is refused.
+    let mut ready = false;
+    for _ in 0..60 {
+        if ssh(&["true"])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    anyhow::ensure!(ready, "CT {} sshd never came up ({})", ct.vmid, ct.ip);
+
+    // 2b. stage the in-container build entrypoint.
     let entry = "/root/build-entry.sh";
     let scp = tokio::process::Command::new("scp")
         .args([
