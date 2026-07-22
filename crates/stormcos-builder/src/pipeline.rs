@@ -34,6 +34,14 @@ pub async fn build(
     let mut logf = LogFile::create(log)?;
     logf.line(&format!("rust pipeline: flavor={flavor} release={release_id}"));
 
+    // 0. harvest each component's latest RELEASE asset and refresh the build
+    //    inputs (agent binaries -> edition layer, control-plane OCI archives ->
+    //    image-store). This is what makes a component commit flow into the image
+    //    without hand-staging; on error, log and continue with the current input.
+    if let Err(e) = refresh_inputs(cfg, p, &mut logf).await {
+        logf.line(&format!("input refresh failed ({e:#}); building from current inputs"));
+    }
+
     // 1. compose the erofs rootfs for this flavor (stormcos-compose edition).
     let ed_out = out_dir.join(format!("edition-{release_id}"));
     run(
@@ -293,6 +301,155 @@ async fn assemble_initramfs(
 /// normally one flavor and it maps to the kubernetes edition. A second flavor is
 /// only meaningful if it composes a genuinely different edition; expressing a
 /// *role* as a flavor just rebuilds identical bytes under another name.
+/// Harvest each harvestable component's latest release asset and refresh the
+/// build inputs in place: kind="agent" RPMs → binaries in the edition layer;
+/// kind="image" OCI archives → the preloaded image-store (rebuilt as erofs).
+/// Best-effort per component (a failure is logged and skipped) so one missing
+/// release never blocks the whole build.
+async fn refresh_inputs(cfg: &Config, p: &Pipeline, logf: &mut LogFile) -> anyhow::Result<()> {
+    let harvestable: Vec<&crate::config::Component> =
+        cfg.components.iter().filter(|c| c.harvest.is_some()).collect();
+    if harvestable.is_empty() {
+        return Ok(());
+    }
+    let gh = crate::github::GitHub::new();
+    let tmp = std::env::temp_dir().join(format!("stormcos-harvest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp)?;
+    let edition_bin = p.layers_dir.join("edition/kubernetes/usr/bin");
+
+    // Seed a writable containers-storage from the current image-store erofs so
+    // images we don't harvest survive; harvested ones are loaded on top.
+    let store_dir = tmp.join("store");
+    std::fs::create_dir_all(&store_dir)?;
+    let mnt = tmp.join("mnt");
+    std::fs::create_dir_all(&mnt)?;
+    if p.image_store.exists() {
+        let _ = run(
+            "mount",
+            &[
+                "-o".into(),
+                "ro".into(),
+                p.image_store.to_string_lossy().into(),
+                mnt.to_string_lossy().into(),
+            ],
+            logf,
+        )
+        .await;
+        let _ = run(
+            "sh",
+            &[
+                "-c".into(),
+                format!("cp -a {}/. {}/ 2>/dev/null || true", mnt.display(), store_dir.display()),
+            ],
+            logf,
+        )
+        .await;
+        let _ = run("umount", &[mnt.to_string_lossy().into()], logf).await;
+    }
+    let runroot = tmp.join("runroot");
+    let mut store_dirty = false;
+
+    for c in &harvestable {
+        let h = c.harvest.as_ref().unwrap();
+        let (tag, url) = match gh.latest_release_asset(&c.repo, &h.asset).await {
+            Ok(Some(a)) => a,
+            Ok(None) => {
+                logf.line(&format!("harvest {}: no asset matching '{}'", c.name, h.asset));
+                continue;
+            }
+            Err(e) => {
+                logf.line(&format!("harvest {}: release lookup failed: {e}", c.name));
+                continue;
+            }
+        };
+        let file = tmp.join(format!("{}.asset", c.name));
+        if let Err(e) = gh.download_asset(&url, &file).await {
+            logf.line(&format!("harvest {}: download failed: {e}", c.name));
+            continue;
+        }
+        logf.line(&format!("harvested {} {tag} (kind={})", c.name, h.kind));
+        match h.kind.as_str() {
+            "agent" => {
+                let ex = tmp.join(format!("{}-x", c.name));
+                std::fs::create_dir_all(&ex)?;
+                run(
+                    "sh",
+                    &[
+                        "-c".into(),
+                        format!(
+                            "cd {} && rpm2cpio {} | cpio -idm --quiet",
+                            ex.display(),
+                            file.display()
+                        ),
+                    ],
+                    logf,
+                )
+                .await?;
+                std::fs::create_dir_all(&edition_bin)?;
+                for b in &h.binaries {
+                    let src = ex.join("usr/bin").join(b);
+                    if src.exists() {
+                        std::fs::copy(&src, edition_bin.join(b))?;
+                        let _ = run(
+                            "chmod",
+                            &["0755".into(), edition_bin.join(b).to_string_lossy().into()],
+                            logf,
+                        )
+                        .await;
+                        logf.line(&format!("  refreshed edition binary {b}"));
+                    } else {
+                        logf.line(&format!("  binary {b} not in {} rpm", c.name));
+                    }
+                }
+            }
+            "image" => {
+                let img = h.image.clone().unwrap_or_else(|| c.name.clone());
+                let localref = format!("localhost/glennswest/{img}:{tag}");
+                let dest = format!(
+                    "containers-storage:[overlay@{}+{}]{localref}",
+                    store_dir.display(),
+                    runroot.display()
+                );
+                run(
+                    "skopeo",
+                    &[
+                        "copy".into(),
+                        "--dest-compress-format=zstd".into(),
+                        format!("docker-archive:{}", file.display()),
+                        dest,
+                    ],
+                    logf,
+                )
+                .await?;
+                logf.line(&format!("  loaded image {localref}"));
+                store_dirty = true;
+            }
+            other => logf.line(&format!("harvest {}: unknown kind '{other}'", c.name)),
+        }
+    }
+
+    // Rebuild the image-store erofs in place if we loaded any image.
+    if store_dirty {
+        let new_store = tmp.join("image-store.erofs");
+        run(
+            "mkfs.erofs",
+            &[
+                "-zlz4hc".into(),
+                "-T0".into(),
+                new_store.to_string_lossy().into(),
+                store_dir.to_string_lossy().into(),
+            ],
+            logf,
+        )
+        .await?;
+        std::fs::copy(&new_store, &p.image_store)?;
+        logf.line(&format!("rebuilt image-store {}", p.image_store.display()));
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(())
+}
+
 fn flavor_edition(_flavor: &str) -> &'static str {
     "kubernetes"
 }

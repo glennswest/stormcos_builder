@@ -38,12 +38,30 @@ repo = "glennswest/rustkube"
 [[components]]
 name = "rustkube-node"
 repo = "glennswest/rustkube-node"
+# harvest the node-agent binaries from its latest RPM into the edition layer,
+# so a rustkube-node commit (e.g. the kubelet static-pod fix) flows into the
+# image automatically — no hand-staging.
+[components.harvest]
+kind = "agent"
+asset = "rustkube-node-*.x86_64.rpm"
+binaries = ["kubelet", "kube-proxy"]
 [[components]]
 name = "fastetcd"
 repo = "glennswest/fastetcd"
+# NOTE: fastetcd is the etcd static pod — it needs a container IMAGE, but its
+# release only ships RPM/musl. Add an OCI-archive asset to harvest it as an
+# image (kind="image"); until then its image comes from the frozen store.
 [[components]]
 name = "cadvisor"
 repo = "glennswest/cadvisor"
+[components.harvest]
+kind = "agent"
+asset = "cadvisor-rs-*.x86_64.rpm"
+binaries = ["cadvisor"]
+# --- control-plane images (kind="image") harvest OCI archives into the store.
+#     rustkube publishes rustkube-apiserver/controller-manager/scheduler
+#     *.docker.tar.gz; wiring these needs multi-asset-per-repo + :latest tag
+#     alignment with the manifests (build-edition-layer.sh). Follow-up.
 [[components]]
 name = "ironprom"
 repo = "glennswest/ironprom"

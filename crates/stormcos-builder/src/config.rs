@@ -246,6 +246,31 @@ pub struct Component {
     /// Branch to watch.
     #[serde(default = "default_branch")]
     pub branch: String,
+    /// How this component's latest RELEASE asset refreshes the build inputs. When
+    /// set, the pipeline harvests it before composing (so a component commit
+    /// flows into the image without hand-staging). When unset, the component is
+    /// only watched (its change triggers a rebuild) but contributes no asset.
+    #[serde(default)]
+    pub harvest: Option<Harvest>,
+}
+
+/// Release-asset harvest for a component: what to pull and where it lands.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Harvest {
+    /// `"image"` — an OCI archive (`*.docker.tar.gz`) loaded into the preloaded
+    /// image-store as `localhost/<image>:<tag>`. `"agent"` — an RPM whose
+    /// binaries are extracted into the edition layer's `/usr/bin`.
+    pub kind: String,
+    /// Regex matching the release asset filename to download.
+    pub asset: String,
+    /// kind="agent": binary basenames to extract from the RPM into the edition
+    /// layer (e.g. ["kubelet", "kube-proxy"]).
+    #[serde(default)]
+    pub binaries: Vec<String>,
+    /// kind="image": the local image name (stored as `localhost/glennswest/<image>`).
+    /// Defaults to the component name.
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 /// External scripts that do the environment-specific heavy lifting. Each is

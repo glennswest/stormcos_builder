@@ -121,4 +121,92 @@ impl GitHub {
         }
         out
     }
+
+    /// The latest release's tag + the API download URL of the first asset whose
+    /// name matches `pattern` (a glob with `*`). Returns None if no release or no
+    /// matching asset. Used to harvest a component's built asset per build.
+    pub async fn latest_release_asset(
+        &self,
+        repo: &str,
+        pattern: &str,
+    ) -> anyhow::Result<Option<(String, String)>> {
+        let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+        let mut req = self
+            .client
+            .get(&url)
+            .header("Accept", "application/vnd.github+json");
+        if let Some(t) = &self.token {
+            req = req.bearer_auth(t);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let v: serde_json::Value = resp.json().await?;
+        let tag = v
+            .get("tag_name")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string();
+        for a in v.get("assets").and_then(|a| a.as_array()).into_iter().flatten() {
+            let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if glob_match(pattern, name) {
+                // The asset API url (not browser_download_url) works for private
+                // repos with Accept: application/octet-stream + token.
+                let dl = a.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+                return Ok(Some((tag, dl)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Download a release asset (by its API `url`) to `dest`.
+    pub async fn download_asset(
+        &self,
+        asset_url: &str,
+        dest: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let mut req = self
+            .client
+            .get(asset_url)
+            .header("Accept", "application/octet-stream");
+        if let Some(t) = &self.token {
+            req = req.bearer_auth(t);
+        }
+        let resp = req.send().await?;
+        anyhow::ensure!(
+            resp.status().is_success(),
+            "download {asset_url}: HTTP {}",
+            resp.status()
+        );
+        let bytes = resp.bytes().await?;
+        std::fs::write(dest, &bytes)?;
+        Ok(())
+    }
+}
+
+/// Minimal glob (`*` = any run) matcher for release asset names — avoids a regex
+/// dependency. `prefix*middle*suffix`.
+fn glob_match(pattern: &str, s: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return pattern == s;
+    }
+    if !s.starts_with(parts[0]) {
+        return false;
+    }
+    let mut pos = parts[0].len();
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        if i == parts.len() - 1 {
+            return s[pos..].ends_with(part);
+        }
+        if part.is_empty() {
+            continue;
+        }
+        match s[pos..].find(part) {
+            Some(idx) => pos += idx + part.len(),
+            None => return false,
+        }
+    }
+    true
 }
