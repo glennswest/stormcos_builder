@@ -97,3 +97,14 @@ assets = [
 # image_store = "/root/out/image-store-kubernetes.erofs"
 # editions_dir = "/root/projects/stormcos/editions"
 # qemu_img    = "qemu-img"
+
+# --- QA (stormcos_qa pulled into the builder VM) ----------------------------
+# After each build the builder runs image-scope QA; after provisioning a node
+# it runs cluster-scope QA against it. Any blocking failure tombstones the
+# release. Set qe_key to enable cluster-scope tests (SSH to the node as `storm`
+# via the baked QE key — stormcos keys/qe.pub).
+# [qa]
+# runner      = "qa-runner"
+# tests_dir   = "/root/projects/stormcos_qa/tests"
+# file_issues = true
+# qe_key      = "/root/.ssh/stormcos-qe"

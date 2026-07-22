@@ -374,8 +374,59 @@ async fn run_qa(app: Arc<App>, release_id: &str) {
         args.push("--file-issues".into());
     }
     let _ = Command::new(&qa.runner).args(&args).status().await;
+    record_qa(&app, release_id, &report).await;
+}
 
-    let parsed: Option<QaReport> = std::fs::read(&report)
+/// Run the cluster-scope QA suite against a freshly provisioned node (reachable
+/// as `storm` over the QE key) and fold the result into the release's gate. This
+/// is where the network + QE-access tests (tests/rustkube-node, tests/stormcos)
+/// actually exercise a booted node — image-scope QA can't. A blocking failure
+/// here tombstones the release just like image-scope.
+pub async fn run_cluster_qa(app: Arc<App>, release_id: &str, node_ip: &str) {
+    let Some(qa) = &app.cfg.qa else { return };
+    let Some(qe_key) = &qa.qe_key else {
+        tracing::info!("cluster QA skipped: no qa.qe_key configured");
+        return;
+    };
+    let flavor = app
+        .read(|s| s.release(release_id).map(|r| r.flavor.clone()))
+        .await
+        .unwrap_or_default();
+    let report = app
+        .cfg
+        .logs_dir()
+        .join(format!("qa-cluster-{release_id}.json"));
+    let ssh = format!(
+        "ssh -i {} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+         -o PreferredAuthentications=publickey -o IdentitiesOnly=yes storm@{node_ip}",
+        qe_key.display()
+    );
+    let mut args = vec![
+        "--tests-dir".to_string(),
+        qa.tests_dir.to_string_lossy().to_string(),
+        "--release".to_string(),
+        release_id.to_string(),
+        "--flavor".to_string(),
+        flavor,
+        "--node-ip".to_string(),
+        node_ip.to_string(),
+        "--ssh".to_string(),
+        ssh,
+        "--report".to_string(),
+        report.to_string_lossy().to_string(),
+    ];
+    if qa.file_issues {
+        args.push("--file-issues".into());
+    }
+    let _ = Command::new(&qa.runner).args(&args).status().await;
+    record_qa(&app, release_id, &report).await;
+}
+
+/// Parse a qa-runner report and fold it into the release: record the summary and
+/// tombstone if any blocking test failed. Shared by image- and cluster-scope QA;
+/// a later (cluster) pass only ever adds tombstones, never clears one.
+async fn record_qa(app: &Arc<App>, release_id: &str, report: &Path) {
+    let parsed: Option<QaReport> = std::fs::read(report)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok());
     app.mutate(|s| {
@@ -387,9 +438,9 @@ async fn run_qa(app: Arc<App>, release_id: &str) {
                 passed: p.passed,
                 failed: p.failed,
                 blocking_failures: p.blocking_failures,
-                report: Some(report.clone()),
+                report: Some(report.to_path_buf()),
             });
-            r.tombstoned = p.blocking_failures > 0;
+            r.tombstoned = r.tombstoned || p.blocking_failures > 0;
         }
     })
     .await;
@@ -422,7 +473,12 @@ pub async fn provision(
     })
     .await;
 
-    let args = vec![name.clone(), dns_name, boot_arg(boot).into(), image];
+    let args = vec![
+        name.clone(),
+        dns_name,
+        boot_arg(boot).into(),
+        image,
+    ];
     let result = run(&app.cfg.scripts.provision_cluster, &args, &log).await;
     let ip = ip_from_log(&log);
     app.mutate(|s| {
@@ -430,7 +486,7 @@ pub async fn provision(
             match &result {
                 Ok(()) => {
                     c.phase = ClusterPhase::Ready;
-                    c.ip = ip;
+                    c.ip = ip.clone();
                     c.message = "ready".into();
                 }
                 Err(e) => {
@@ -441,6 +497,20 @@ pub async fn provision(
         }
     })
     .await;
+
+    // Node is up — run cluster-scope QA against it and gate the release.
+    if result.is_ok()
+        && let Some(ip) = ip.as_deref().filter(|ip| *ip != "0.0.0.0")
+    {
+        run_cluster_qa(app.clone(), &release_id_of(&app, &name).await, ip).await;
+    }
+}
+
+/// The release id backing a named cluster (for post-provision QA gating).
+async fn release_id_of(app: &Arc<App>, name: &str) -> String {
+    app.read(|s| s.cluster(name).map(|c| c.release_id.clone()))
+        .await
+        .unwrap_or_default()
 }
 
 /// Wipe + rebuild an existing test machine in place (fast reprovision).

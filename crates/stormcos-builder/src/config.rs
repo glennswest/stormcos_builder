@@ -54,6 +54,10 @@ pub struct Qa {
     /// File GitHub issues in owning repos on failure.
     #[serde(default)]
     pub file_issues: bool,
+    /// QE private key used to reach a provisioned node as `storm` for
+    /// cluster-scope tests. When unset, only image-scope QA runs.
+    #[serde(default)]
+    pub qe_key: Option<PathBuf>,
 }
 
 fn def_qa_runner() -> String {
