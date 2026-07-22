@@ -10,6 +10,7 @@ mod github;
 mod jobs;
 mod model;
 mod pipeline;
+mod devct_build;
 #[allow(dead_code)]
 mod reconcile;
 mod web;

@@ -41,6 +41,69 @@ pub struct Config {
     /// QA: run the test suite after each build; tombstone on blocking failure.
     #[serde(default)]
     pub qa: Option<Qa>,
+    /// devct: run the image assembly in an ephemeral Proxmox LXC instead of on a
+    /// persistent host. When set, the build runs in a throwaway container that
+    /// pulls the repo, builds, publishes, and is destroyed.
+    #[serde(default)]
+    pub devct: Option<Devct>,
+}
+
+/// devct build integration — the ublk image assembly runs in an ephemeral,
+/// throwaway Proxmox LXC (block profile, serialized to one global slot) rather
+/// than on a persistent build box. A build failure files an issue on `repo`
+/// (the repo whose code the container built).
+#[derive(Clone, Debug, Deserialize)]
+pub struct Devct {
+    /// Proxmox API base, e.g. https://pve.g8.lo:8006/api2/json
+    pub api: String,
+    /// Proxmox node name, e.g. pve
+    pub node: String,
+    /// Forced-command SSH endpoint for block work (host-root ublk operations).
+    #[serde(default = "def_devct_ssh")]
+    pub ssh_host: String,
+    /// PVE API token value (`builder@pve!fleet=<secret>`); when empty, falls
+    /// back to $DEVCT_TOKEN / $PROXMOX_API_TOKEN.
+    #[serde(default)]
+    pub token: String,
+    /// The repo whose code the container builds. A build failure files an issue
+    /// here — including when it is the builder's own repo.
+    pub repo: String,
+    /// Profile: "block" (ublk/stormblock slab assembly — serialized) or
+    /// "compile" (parallel). The image build needs ublk, so "block".
+    #[serde(default = "def_devct_profile")]
+    pub profile: String,
+    /// In-container build entrypoint: staged into the container and run. It
+    /// pulls `repo`, builds the image, and publishes the release asset.
+    pub build_script: PathBuf,
+    #[serde(default = "def_devct_cores")]
+    pub cores: u32,
+    #[serde(default = "def_devct_mem")]
+    pub memory_mb: u32,
+}
+
+impl Devct {
+    /// Effective token: config value, else $DEVCT_TOKEN / $PROXMOX_API_TOKEN.
+    pub fn token(&self) -> String {
+        if !self.token.is_empty() {
+            return self.token.clone();
+        }
+        std::env::var("DEVCT_TOKEN")
+            .or_else(|_| std::env::var("PROXMOX_API_TOKEN"))
+            .unwrap_or_default()
+    }
+}
+
+fn def_devct_ssh() -> String {
+    "root@pve.g8.lo".into()
+}
+fn def_devct_profile() -> String {
+    "block".into()
+}
+fn def_devct_cores() -> u32 {
+    8
+}
+fn def_devct_mem() -> u32 {
+    16384
 }
 
 /// QA integration (stormcos_qa pulled into the builder VM).

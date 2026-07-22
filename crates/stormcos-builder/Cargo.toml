@@ -21,3 +21,4 @@ tracing-subscriber.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 stormcos-install = { workspace = true }
+devct-driver = { workspace = true }

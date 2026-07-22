@@ -108,3 +108,19 @@ assets = [
 # tests_dir   = "/root/projects/stormcos_qa/tests"
 # file_issues = true
 # qe_key      = "/root/.ssh/stormcos-qe"
+
+# --- devct: build in an ephemeral throwaway LXC (no persistent build host) ---
+# When set, the build runs in a fresh Proxmox LXC that pulls the repo, builds,
+# publishes the release, and is destroyed. The ublk slab assembly needs the
+# block profile (serialized to one global slot). A build failure files an issue
+# on `repo` (the repo whose code was built).
+# [devct]
+# api          = "https://pve.g8.lo:8006/api2/json"
+# node         = "pve"
+# ssh_host     = "root@pve.g8.lo"
+# token        = ""                     # or $DEVCT_TOKEN / $PROXMOX_API_TOKEN
+# repo         = "glennswest/stormcos"  # failure -> issue here
+# profile      = "block"                # ublk/stormblock assembly (serialized)
+# build_script = "scripts/build-entry.sh"
+# cores        = 8
+# memory_mb    = 16384

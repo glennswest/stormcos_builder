@@ -50,6 +50,41 @@ impl GitHub {
             .ok_or_else(|| anyhow::anyhow!("no sha in commit response for {}", c.repo))
     }
 
+    /// File an issue on `repo` (e.g. `glennswest/stormcos`) — used to report a
+    /// build failure on the repo whose code was being built. Requires a token
+    /// with `issues:write`; returns the new issue URL. Best-effort dedup is left
+    /// to the caller (title/marker), matching component-builder's convention.
+    pub async fn create_issue(
+        &self,
+        repo: &str,
+        title: &str,
+        body: &str,
+    ) -> anyhow::Result<String> {
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("no GitHub token; cannot file issue on {repo}"))?;
+        let url = format!("https://api.github.com/repos/{repo}/issues");
+        let resp = self
+            .client
+            .post(&url)
+            .header("Accept", "application/vnd.github+json")
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "title": title, "body": body }))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            resp.status().is_success(),
+            "create issue on {repo}: HTTP {}",
+            resp.status()
+        );
+        let v: serde_json::Value = resp.json().await?;
+        Ok(v.get("html_url")
+            .and_then(|u| u.as_str())
+            .unwrap_or_default()
+            .to_string())
+    }
+
     /// Short one-line summaries of commits in `component.branch` since `since`
     /// (exclusive). Used for release notes. Best-effort; returns empty on error.
     pub async fn commits_since(&self, c: &Component, since: Option<&str>) -> Vec<String> {

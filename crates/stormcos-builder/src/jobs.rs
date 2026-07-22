@@ -43,11 +43,11 @@ async fn run(script: &str, args: &[String], log: &Path) -> anyhow::Result<()> {
 /// What a build script writes next to its images so the service can register
 /// the release's artifacts + network targets.
 #[derive(serde::Deserialize)]
-struct BuildManifest {
+pub(crate) struct BuildManifest {
     #[serde(default)]
-    artifacts: Vec<Artifact>,
+    pub(crate) artifacts: Vec<Artifact>,
     #[serde(default)]
-    targets: Vec<NetworkTarget>,
+    pub(crate) targets: Vec<NetworkTarget>,
 }
 
 /// Trigger a boot-image build for `flavor`. Records a Build, runs the build
@@ -75,9 +75,15 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
     let _ = std::fs::create_dir_all(&images);
     let manifest = images.join(format!("{id}.manifest.json"));
 
-    // Prefer the in-process Rust pipeline; fall back to the build script.
+    // Build path preference:
+    //   1. devct  — ephemeral throwaway LXC (pull/build/push/delete); the ublk
+    //      slab assembly runs in the serialized block profile. No persistent host.
+    //   2. in-process Rust pipeline (legacy persistent-host path).
+    //   3. the build-image shell script.
     let result: anyhow::Result<(Vec<Artifact>, Vec<NetworkTarget>)> =
-        if app.cfg.pipeline.is_some() {
+        if let Some(dc) = &app.cfg.devct {
+            crate::devct_build::build(&app.cfg, dc, &flavor, &id, &images, &log).await
+        } else if app.cfg.pipeline.is_some() {
             crate::pipeline::build(&app.cfg, &flavor, &id, &images, &log).await
         } else {
             // Args: flavor, release-id, out-dir, manifest-path, comma-joined assets.
@@ -96,6 +102,24 @@ pub async fn build(app: Arc<App>, flavor: String, reason: String) -> String {
                     .unwrap_or_default()
             })
         };
+
+    // On failure, file an issue on the repo whose code we built (config.devct.repo)
+    // — including when that is the builder's own repo. Mirrors component-builder's
+    // originator routing. Best-effort; a filing error never masks the build error.
+    if let (Err(err), Some(dc)) = (&result, &app.cfg.devct) {
+        let title = format!("build failed: {id}");
+        let body = format!(
+            "Build `{id}` (flavor `{flavor}`) failed in a devct `{}` container.\n\n\
+             **Reason:** {reason}\n\n**Error:**\n```\n{err:#}\n```\n\n\
+             Log: `{}` on the builder.",
+            dc.profile,
+            log.display()
+        );
+        match app.gh.create_issue(&dc.repo, &title, &body).await {
+            Ok(url) => tracing::info!("filed build-failure issue on {}: {url}", dc.repo),
+            Err(e) => tracing::warn!("could not file build-failure issue on {}: {e:#}", dc.repo),
+        }
+    }
 
     app.mutate(|s| {
         let ok = result.is_ok();
