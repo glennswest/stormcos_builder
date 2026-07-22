@@ -317,6 +317,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
+name = "devct-driver"
+version = "0.1.0"
+source = "git+ssh://git@github.com/glennswest/devct-driver.git#4594cf3a9115c48afef58bc8ad915ea1abd5e044"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1265,6 +1277,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "devct-driver",
  "reqwest",
  "serde",
  "serde_json",

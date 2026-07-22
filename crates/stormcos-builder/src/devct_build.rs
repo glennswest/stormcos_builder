@@ -3,9 +3,13 @@
 //! push assets → delete. The ublk/stormblock slab assembly requires the **block**
 //! profile, which devct serializes to one global slot.
 //!
+//! The build is the builder's job in Rust: the container runs the SAME builder
+//! binary (`stormcos-builder build ...`, the in-process pipeline), not a shell
+//! script.
+//!
 //! Flow:
 //!   1. create the container (devct-driver; block => serialized/backed off).
-//!   2. stage the in-container build entrypoint + run it (pull → build → publish).
+//!   2. wait for sshd, stage the builder binary + config, run `... build ...`.
 //!   3. copy the manifest it produced back and parse it into the release.
 //!   4. ALWAYS destroy the container (even on failure).
 //!
@@ -103,33 +107,46 @@ async fn run_in_container(
     }
     anyhow::ensure!(ready, "CT {} sshd never came up ({})", ct.vmid, ct.ip);
 
-    // 2b. stage the in-container build entrypoint.
-    let entry = "/root/build-entry.sh";
-    let scp = tokio::process::Command::new("scp")
-        .args([
+    // 2b. stage the builder binary + its container config. The build is the
+    // builder's job in Rust — the container runs `stormcos-builder build ...`
+    // (the same pipeline the service uses), not a shell script.
+    let builder_bin = match &dc.builder_bin {
+        Some(p) => p.clone(),
+        None => std::env::current_exe()?,
+    };
+    let scp_to = |src: String, dst: &str| {
+        let dst = format!("{host}:{dst}");
+        let mut c = tokio::process::Command::new("scp");
+        c.args([
             "-o",
             "StrictHostKeyChecking=no",
             "-o",
             "UserKnownHostsFile=/dev/null",
-            &dc.build_script.to_string_lossy(),
-            &format!("{host}:{entry}"),
-        ])
-        .output()
-        .await?;
-    anyhow::ensure!(
-        scp.status.success(),
-        "staging build entrypoint to CT {}: {}",
-        ct.vmid,
-        String::from_utf8_lossy(&scp.stderr).trim()
-    );
+            &src,
+            &dst,
+        ]);
+        c
+    };
+    for (src, dst) in [
+        (builder_bin.to_string_lossy().to_string(), "/root/stormcos-builder"),
+        (dc.ct_config.to_string_lossy().to_string(), "/root/builder.toml"),
+    ] {
+        let o = scp_to(src.clone(), dst).output().await?;
+        anyhow::ensure!(
+            o.status.success(),
+            "staging {src} to CT {}: {}",
+            ct.vmid,
+            String::from_utf8_lossy(&o.stderr).trim()
+        );
+    }
 
-    // 2b. run it: pull repo -> build -> publish. Env carries the job identity;
-    // the container writes /root/out/manifest.json describing what it published.
+    // 2c. run the one-shot Rust build inside the container.
     let cmd = format!(
-        "REPO='{}' FLAVOR='{}' RELEASE='{}' OUT=/root/out \
-         bash {entry} > /root/build.log 2>&1; rc=$?; \
-         echo \"---build.log---\"; tail -n 200 /root/build.log; exit $rc",
-        dc.repo, flavor, release_id
+        "chmod +x /root/stormcos-builder && \
+         /root/stormcos-builder build --config /root/builder.toml \
+           --flavor '{flavor}' --release '{release_id}' --out /root/out \
+           > /root/build.log 2>&1; rc=$?; \
+         echo '---build.log tail---'; tail -n 200 /root/build.log; exit $rc"
     );
     let out = ssh(&["bash", "-lc", &cmd]).output().await?;
     append_log(log, &out.stdout);

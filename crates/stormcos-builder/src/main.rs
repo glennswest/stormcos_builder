@@ -101,8 +101,19 @@ impl App {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_target(false).init();
 
-    let cfg_path = std::env::args()
-        .nth(1)
+    let args: Vec<String> = std::env::args().collect();
+    // `stormcos-builder build ...` runs a one-shot image build (the SAME Rust
+    // pipeline the service uses) and exits. This is the entrypoint the ephemeral
+    // devct container runs — the build is the builder's job, in Rust, not a shell
+    // script. Without a subcommand, arg[1] is the config path and we run the
+    // coordinator service.
+    if args.get(1).map(String::as_str) == Some("build") {
+        return build_command(&args[2..]).await;
+    }
+
+    let cfg_path = args
+        .get(1)
+        .cloned()
         .unwrap_or_else(|| "config/stormcos-builder.toml".to_string());
     let cfg = Config::load(std::path::Path::new(&cfg_path))?;
     std::fs::create_dir_all(cfg.images_dir())?;
@@ -126,5 +137,45 @@ async fn main() -> anyhow::Result<()> {
         app.cfg.components.len()
     );
     axum::serve(listener, router).await?;
+    Ok(())
+}
+
+/// One-shot build: `stormcos-builder build --config C --flavor F --release R --out O`.
+/// Runs the in-process Rust pipeline (the same `pipeline::build` the service uses)
+/// and writes `<out>/manifest.json` describing the artifacts. This is what the
+/// throwaway devct container runs — no shell build script. Publishing (release
+/// upload) is done by the caller from the manifest, or added here later.
+async fn build_command(args: &[String]) -> anyhow::Result<()> {
+    let mut cfg_path = "config/stormcos-builder.toml".to_string();
+    let (mut flavor, mut release, mut out) = (None, None, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--config" => cfg_path = it.next().cloned().unwrap_or(cfg_path),
+            "--flavor" => flavor = it.next().cloned(),
+            "--release" => release = it.next().cloned(),
+            "--out" => out = it.next().cloned(),
+            other => anyhow::bail!("unknown build arg: {other}"),
+        }
+    }
+    let flavor = flavor.ok_or_else(|| anyhow::anyhow!("--flavor required"))?;
+    let release = release.ok_or_else(|| anyhow::anyhow!("--release required"))?;
+    let out = std::path::PathBuf::from(out.ok_or_else(|| anyhow::anyhow!("--out required"))?);
+    let cfg = Config::load(std::path::Path::new(&cfg_path))?;
+    std::fs::create_dir_all(&out)?;
+    let log = out.join(format!("build-{release}.log"));
+
+    tracing::info!("one-shot build: flavor={flavor} release={release} out={}", out.display());
+    let (artifacts, targets) = pipeline::build(&cfg, &flavor, &release, &out, &log).await?;
+
+    let manifest = out.join("manifest.json");
+    std::fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "artifacts": artifacts,
+            "targets": targets,
+        }))?,
+    )?;
+    tracing::info!("wrote {} ({} artifacts)", manifest.display(), artifacts.len());
     Ok(())
 }

@@ -72,9 +72,14 @@ pub struct Devct {
     /// "compile" (parallel). The image build needs ublk, so "block".
     #[serde(default = "def_devct_profile")]
     pub profile: String,
-    /// In-container build entrypoint: staged into the container and run. It
-    /// pulls `repo`, builds the image, and publishes the release asset.
-    pub build_script: PathBuf,
+    /// The builder binary to run inside the container (`stormcos-builder build
+    /// ...` — the same Rust pipeline, not a shell script). Defaults to the
+    /// running coordinator's own executable, copied into the container.
+    #[serde(default)]
+    pub builder_bin: Option<PathBuf>,
+    /// The config the in-container `build` uses (its [pipeline] inputs are
+    /// container paths). Staged into the container.
+    pub ct_config: PathBuf,
     #[serde(default = "def_devct_cores")]
     pub cores: u32,
     #[serde(default = "def_devct_mem")]
